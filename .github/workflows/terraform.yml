@@ -1,8 +1,6 @@
-name: 'Terraform Workflow'
+name: Terraform CI
 
 on:
-  push:
-    branches: [ "main" ]
   pull_request:
     branches:
       - okta-dev
@@ -13,45 +11,72 @@ permissions:
 
 jobs:
   terraform:
-    name: 'Terraform'
+    name: Terraform Plan
     runs-on: ubuntu-latest
+    environment: production
+
+    env:
+      AWS_REGION: us-east-2
+
     defaults:
       run:
         shell: bash
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-    - name: Set environment variables
-      id: vars
-      run: |
-        BRANCH="${{ github.head_ref || github.ref_name }}"
-        if [[ "$BRANCH" == "okta-dev" ]]; then
-          echo "TF_WORKSPACE=okta-dev" >> $GITHUB_ENV
-        elif [[ "$BRANCH" == "okta-preview" ]]; then
-          echo "TF_WORKSPACE=okta-preview" >> $GITHUB_ENV
-        else
-          echo "TF_WORKSPACE=main" >> $GITHUB_ENV
-        fi
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
 
-    - name: Setup Terraform CLI
-      uses: hashicorp/setup-terraform@v1
-      with:
-        cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
+      - name: Set environment-specific variables
+        id: env_vars
+        run: |
+          if [[ "${{ github.base_ref }}" == "okta-dev" ]]; then
+            echo "TF_DIR=okta-dev" >> $GITHUB_ENV
+            echo "STATE_KEY=okta-dev/terraform.tfstate" >> $GITHUB_ENV
+            echo "SECRET_ID=okta/dev/api-token" >> $GITHUB_ENV
+          elif [[ "${{ github.base_ref }}" == "okta-preview" ]]; then
+            echo "TF_DIR=okta-preview" >> $GITHUB_ENV
+            echo "STATE_KEY=okta-preview/terraform.tfstate" >> $GITHUB_ENV
+            echo "SECRET_ID=okta/preview/api-token" >> $GITHUB_ENV
+          else
+            echo "Invalid base branch"
+            exit 1
+          fi
 
-    - name: Terraform Init
-      run: terraform init
+      - name: Fetch Okta API Token from AWS Secrets Manager
+        id: fetch_token
+        run: |
+          TOKEN=$(aws secretsmanager get-secret-value \
+            --secret-id $SECRET_ID \
+            --query SecretString --output text | jq -r .okta_api_token)
+          echo "::add-mask::$TOKEN"
+          echo "OKTA_API_TOKEN=$TOKEN" >> $GITHUB_ENV
 
-    - name: Terraform Select Workspace
-      run: terraform workspace select $TF_WORKSPACE || terraform workspace new $TF_WORKSPACE
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v1
+        with:
+          terraform_version: 1.5.0
 
-    - name: Terraform Format Check
-      run: terraform fmt -check
+      - name: Terraform Init
+        run: |
+          cd $TF_DIR
+          terraform init -backend-config="bucket=okta-terraform-state-dev" \
+                         -backend-config="key=$STATE_KEY" \
+                         -backend-config="region=$AWS_REGION" \
+                         -backend-config="dynamodb_table=terraform-locks"
 
-    - name: Terraform Plan
-      run: terraform plan -input=false
+      - name: Terraform Format
+        run: |
+          cd $TF_DIR
+          terraform fmt -check
 
-    - name: Terraform Apply (only on push to main)
-      if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-      run: terraform apply -auto-approve -input=false
+      - name: Terraform Plan
+        run: |
+          cd $TF_DIR
+          terraform plan -var="okta_api_token=$OKTA_API_TOKEN"
