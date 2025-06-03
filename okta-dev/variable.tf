@@ -1,0 +1,1 @@
+variable "okta_api_token"{}

@@ -18,5 +18,5 @@ terraform {
 provider "okta" {
   org_name = "dev-52120855"
   base_url = "okta.com"
-  api_token = "001mIs9SdKr-qrMk2mE1GPxAZ2SgMuO3aQYA-35lHo"
+  api_token = var.okta_api_token
 }
