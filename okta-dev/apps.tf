@@ -14,7 +14,6 @@ resource "okta_app_oauth" "TerraformApplication" {
     client_id                        = "0oam4brhe8quAFSvr5d7"
     client_uri                       = null
     consent_method                   = "REQUIRED"
-    enduser_note                     = null
     grant_types                      = [
         "client_credentials",
     ]
