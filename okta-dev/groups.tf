@@ -1,3 +1,3 @@
 resource "okta_group" "terraformgroup" {
-  name = "Terraform Group 1"
+  name = "Terraform Group 2"
 }
