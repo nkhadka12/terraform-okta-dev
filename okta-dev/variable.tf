@@ -1,1 +1,3 @@
-variable "okta_api_token"{}
+variable "okta_api_token"{
+     sensitive = true
+}
